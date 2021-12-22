@@ -25,6 +25,8 @@ impl Serial {
             .stop_bits(StopBits::One)
             .timeout(Duration::from_secs(0));
         let tty = port_builder.open()?;
+        tty.clear(ClearBuffer::All)?;
+        tty.clear_break()?;
         Ok(Self { tty })
     }
 
