@@ -15,6 +15,9 @@ pub enum SoapboxError {
 
     #[error("Protocol error: {0}")]
     ProtocolError(&'static str),
+
+    #[error("Poison error!")]
+    PoisonError,
 }
 
 pub type SoapboxResult<T> = Result<T, SoapboxError>;

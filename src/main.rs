@@ -2,7 +2,7 @@ use std::{
     env, fs,
     path::Path,
     process,
-    sync::{Arc, Mutex},
+    sync::{mpsc::Receiver, Arc, Mutex},
     thread,
     time::{Duration, Instant},
 };
@@ -37,6 +37,7 @@ fn main() {
                 SoapboxError::TimeoutError(_) | SoapboxError::ProtocolError(_) => {
                     reconnect_message()
                 }
+                SoapboxError::PoisonError => fatal_error(err.to_string()),
             }
         } else {
             break;
@@ -72,8 +73,7 @@ fn soapbox(args: &[String]) -> SoapboxResult<()> {
     let data = load_payload(payload_path)?;
     send_size(&mut serial, data.len())?;
     send_payload(&mut serial, &data, payload_path)?;
-    terminal(serial);
-    Ok(())
+    terminal(serial)
 }
 
 const SHORT_NAME: &str = "SB";
@@ -175,35 +175,51 @@ fn send_payload(serial: &mut Serial, data: &[u8], path: &str) -> SoapboxResult<(
     Ok(())
 }
 
-fn terminal(serial: Serial) {
+fn terminal(serial: Serial) -> SoapboxResult<()> {
     let serial_recv = Arc::new(Mutex::new(serial));
     let serial_send = Arc::clone(&serial_recv);
 
     let (kill_send, kill_recv) = std::sync::mpsc::sync_channel(2);
+    let (err_send, err_recv) = std::sync::mpsc::sync_channel(2);
 
-    let receiver = thread::spawn(move || loop {
-        if let Ok(_) = kill_recv.try_recv() {
-            break;
+    let receiver = thread::spawn(move || {
+        fn receiver_fn(
+            serial_recv: Arc<Mutex<Serial>>,
+            kill_recv: Receiver<()>,
+        ) -> SoapboxResult<()> {
+            loop {
+                if let Ok(_) = kill_recv.try_recv() {
+                    break Ok(());
+                }
+                let ch = {
+                    let mut serial = serial_recv.lock().or(Err(SoapboxError::PoisonError))?;
+                    serial.getc()?
+                };
+                if ch == b'\n' {
+                    console::putc(b'\r')?;
+                }
+                console::putc(ch)?;
+            }
         }
-        let ch = {
-            let mut serial = serial_recv.lock().unwrap();
-            serial.getc().unwrap()
-        };
-        if ch == b'\n' {
-            console::putc(b'\r').unwrap();
+
+        if let Err(err) = receiver_fn(serial_recv, kill_recv) {
+            err_send.send(err).unwrap();
         }
-        console::putc(ch).unwrap();
     });
 
     loop {
-        let ch = console::getc().unwrap();
+        if let Ok(err) = err_recv.try_recv() {
+            return Err(err);
+        }
+        let ch = console::getc()?;
         if ch == b'\x03' {
             kill_send.send(()).unwrap();
             break;
         }
-        let mut serial = serial_send.lock().unwrap();
-        serial.putc(ch).unwrap();
+        let mut serial = serial_send.lock().or(Err(SoapboxError::PoisonError))?;
+        serial.putc(ch)?;
     }
 
     receiver.join().unwrap();
+    Ok(())
 }
