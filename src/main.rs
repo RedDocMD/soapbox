@@ -32,12 +32,12 @@ fn main() {
     loop {
         if let Err(err) = soapbox(&args) {
             match err {
-                SoapboxError::IOError(err) => fatal_error(err.to_string()),
-                SoapboxError::SerialError(err) => fatal_error(err.to_string()),
+                SoapboxError::IOError(_)
+                | SoapboxError::SerialError(_)
+                | SoapboxError::PoisonError => fatal_error(err.to_string()),
                 SoapboxError::TimeoutError(_) | SoapboxError::ProtocolError(_) => {
-                    reconnect_message()
+                    reconnect_message(err.to_string())
                 }
-                SoapboxError::PoisonError => fatal_error(err.to_string()),
             }
         } else {
             break;
@@ -45,11 +45,13 @@ fn main() {
     }
 }
 
-fn reconnect_message() {
+fn reconnect_message(mess: String) {
     println!(
-        "\n[{}] ⚡ {}: {}",
+        "\n[{}] ⚡ {}: {}\n[{}] ⚡ {}",
         SHORT_NAME,
         "Connection or protocol Error".bright_red().bold(),
+        mess,
+        SHORT_NAME,
         "Remove power and USB serial. Reinsert serial first, then power".bright_red(),
     );
 }
